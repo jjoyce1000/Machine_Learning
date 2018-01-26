@@ -1,0 +1,320 @@
+---
+title:  "Machine Learning Model - Human Activity Recognition"
+author: "Author: John Joyce"
+date:   "Date: January 22, 2018"
+output:
+  html_document: null
+  keep_md: yes
+  pdf_document: default
+file: machine_learning_project.Rmd
+---
+
+<style type="text/css"> 
+h1.title { 
+  font-size: 28px; 
+  color: DarkRed; 
+} 
+</style> 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###**Summary**  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collecta large amount of data about
+personal activity relatively inexpensively.  These type of devices are part of the quantified self movement - a group
+of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior,
+or because they are tech geeks.  One thing that people regularly do is quantify how much of a particular activity they do,
+but they rarely quantify how well they do it. 
+
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of six participants
+and predict the manner in which they did the exercise.
+
+The participants were asked to perform barbell lifts correctly and incorrectly in five different ways, classified as follows:
+    
+    Class A) Exactly according to specification.
+    Class B) Throwing the elbows to the front.
+    Class C) Lifting the dumbell only halfway.
+    Class D) Lowering the dumbell only halfway.
+    Class E) Throwing the hips to the front.
+
+More information for this activity is available at this website: 
+http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (Weight Lifting Exercise Dataset).
+
+This analysis describes the following:  
+
+    1) How was the model built? 
+    2) How was cross validation used to verify the model?
+    3) What is the expected accuracy/ out of sample error?
+    4) Why was this model chosen?
+
+Finally, this model will also be used to predict 20 different test cases.
+
+###**Data Analysis**  
+The training data used for this model are available at https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv.  
+The test data used for this model are available at https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv.
+
+####**Load Packages & Import Data**
+This section installs/loads the required packages if they are not already loaded.
+This section also loads the training and testing data sets used for the modeling.
+
+```{r echo=TRUE, message=FALSE,warning=FALSE}
+##  Install the required packages
+
+    if (!require("caret")) install.packages("caret")
+    if (!require("rpart")) install.packages("rpart")
+    if (!require("rattle")) install.packages("rattle")
+    if (!require("randomForest")) install.packages("randomForest")
+    if (!require("gbm")) install.packages("gbm")
+    if (!require("knitr")) install.packages("knitr")
+    if (!require("corrplot")) install.packages("corrplot")
+    
+##  Load the required packages.
+
+    library(caret)
+    library(rpart)
+    library(rattle)
+    library(randomForest)
+    library(gbm)
+    library(knitr)
+    library(corrplot)
+
+##  Load the concrete data set.
+    
+    training_ds  <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                             na.strings = c("NA", "", "#DIV/0!"))
+    testing_ds   <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                             na.strings = c("NA", "", "#DIV/0!"))
+```
+####**Load Packages & Import Data**
+This section reviews and cleans the training and test data sets.
+
+```{r echo=TRUE, message=FALSE,warning=FALSE}
+##  Review the dimensions of the training and test data sets. 
+    
+    dim(training_ds)
+    dim(testing_ds)
+```
+```{r echo=TRUE, message=FALSE,warning=FALSE,eval=FALSE}
+##  Review the data variable types in the training and test data sets.
+##  Output omitted from report for simplicity.
+
+    str(training_ds)
+    str(testing_ds)
+    head(training_ds)
+    head(testing_ds)
+```
+Evaluating the data reveals that there are alot of NA values.  This analysis will remove columns (predictors) that have greater
+than 75% of the data that is not useable (zeroes, NAs, etc).
+
+```{r echo=TRUE, message=FALSE,warning=FALSE}
+##  Remove columns which contain greater than or equal to 75% NAs from training and test data sets.
+    
+    training_ds  <- training_ds[, -which(colMeans(is.na(training_ds)) > 0.75)]
+    testing_ds   <-testing_ds[, -which(colMeans(is.na(testing_ds)) > 0.75)]
+    
+##  Verify that all of the NAs have been removed from the training and test data sets.
+    
+    sum(is.na(training_ds))
+    sum(is.na(testing_ds))
+    
+##  Remove unrelated text related columns (1-7).
+    
+    training_ds  <- training_ds[,-c(1:7)]
+    testing_ds   <- testing_ds[,-c(1:7)]
+```
+The resulting cleaned data sets have the following dimensions.
+```{r echo=TRUE, message=FALSE,warning=FALSE}
+##  Review the dimensions of the training and test data sets. 
+    
+    dim(training_ds)
+    dim(testing_ds)
+```
+###**Modeling** 
+This section outlines the modeling methods (classification tree, random forest, and boosting) used for this prediction model.
+The model is developed to predict the "classe" variable.
+
+####**Data Splitting**
+This section sets a random seed and splits the training data set into a training and test data set (70/30 split).
+
+```{r echo=TRUE, message=FALSE,warning=FALSE}
+##  Set a seed = 2000
+
+    set.seed(2000)
+
+##  Split the training data set into a training (70%) and test data sets (30%).
+
+    inTrain     <- createDataPartition(training_ds$classe,p=.7,list = FALSE)
+    training    <- training_ds[inTrain,]
+    testing     <- training_ds[-inTrain,]
+
+    dim(training)
+    dim(testing)
+```    
+####**Classification Tree Model**
+This section outlines the Classification Tree Modeling methods and results.  The model uses the trainControl function to perform
+cross validation with k = 5.  The rattle package is used to plot the classification tree shown and the
+confusionMatrix function is used to calculate the accuracy of this model, which is found to be approx 50%.
+
+```{r echo=TRUE, message=FALSE,warning=FALSE,fig.align='center',fig.height=5,fig.width=10}
+##  Set train control settings
+    
+    mod_trControl <- trainControl(method = "cv", number = 5)
+
+##  Create a classification tree model using the rpart method to fit the data.
+
+    modFit_rpart <- train(classe~., data=training, method = "rpart", trControl = mod_trControl)
+    fancyRpartPlot(modFit_rpart$finalModel)
+```
+The validation test set is used to predict the accuracy of this model.
+
+```{r echo=TRUE, message=FALSE,warning=FALSE}
+
+##  Use a confusion matrix to generate the prediction output.
+
+    predict_rpart <- predict(modFit_rpart, testing)
+    confMatrix_rpart <- confusionMatrix(testing$classe, predict_rpart)
+    confMatrix_rpart
+```
+####**Random Forest Model**
+This section outlines the Random Forest Modeling methods and results.  
+
+```{r echo=TRUE, message=FALSE,warning=FALSE,fig.align='center',fig.height=5,fig.width=10}
+##  Create a random forest model using the rf method to fit the data.
+
+    modFit_rf <- randomForest(classe~., data=training, importance=TRUE)
+```
+The validation test set is used to predict the accuracy of this model.
+The confusionMatrix function is used to calculate the accuracy of this model, which is found to be approx 99.5%.
+
+```{r echo=TRUE, message=FALSE,warning=FALSE}
+##  Use a confusion matrix to generate the prediction output.
+
+    predict_rf <- predict(modFit_rf, testing)
+    confMatrix_rf <- confusionMatrix(testing$classe, predict_rf)
+    confMatrix_rf
+```
+####**Generalized Boosted Model**
+This section outlines the Generalized Boosted Modeling methods and results.
+
+```{r echo=TRUE, message=FALSE,warning=FALSE,fig.align='center',fig.height=5,fig.width=10}
+##  Create a random generalized boosted model using the gbm method to fit the data.
+
+    modFit_gbm <- train(classe~., data=training, method = "gbm", trControl = mod_trControl, verbose=FALSE)
+```
+The validation test set is used to predict the accuracy of this model.
+The confusionMatrix function is used to calculate the accuracy of this model, which is found to be approx 95.9%.
+
+```{r echo=TRUE, message=FALSE,warning=FALSE}
+##  Use a confusion matrix to generate the prediction output.
+
+    predict_gbm <- predict(modFit_gbm, testing)
+    confMatrix_gbm <- confusionMatrix(testing$classe, predict_gbm)
+    confMatrix_gbm
+```
+After comparing the accuracy of the classification tree, random forest, and generalied boosted model; the random forest
+model is used with (accuracy = 99.5%) to predit the test data set (test_ds).
+
+```{r echo=TRUE, message=FALSE,warning=FALSE}
+##  Use a confusion matrix to generate the prediction output.
+
+    predict(modFit_rf, testing_ds)
+```
+###**Raw Code** 
+```{r echo=TRUE, eval=FALSE, message=FALSE,warning=FALSE}
+##  Install the required packages
+
+    if (!require("caret")) install.packages("caret")
+    if (!require("rpart")) install.packages("rpart")
+    if (!require("rattle")) install.packages("rattle")
+    if (!require("randomForest")) install.packages("randomForest")
+    if (!require("gbm")) install.packages("gbm")
+    if (!require("knitr")) install.packages("knitr")
+    if (!require("corrplot")) install.packages("corrplot")
+    
+##  Load the required packages.
+
+    library(caret)
+    library(rpart)
+    library(rattle)
+    library(randomForest)
+    library(gbm)
+    library(knitr)
+    library(corrplot)
+
+##  Load the concrete data set.
+    
+    training_ds  <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                             na.strings = c("NA", "", "#DIV/0!"))
+    testing_ds   <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                             na.strings = c("NA", "", "#DIV/0!"))
+##  Review the dimensions of the training and test data sets. 
+    
+    dim(training_ds)
+    dim(testing_ds)
+
+    ##  Review the data variable types in the training and test data sets.
+##  Output omitted from report for simplicity.
+
+    str(training_ds)
+    str(testing_ds)
+    head(training_ds)
+    head(testing_ds)
+  
+##  Remove columns which contain greater than or equal to 75% NAs from training and test data sets.
+    
+    training_ds  <- training_ds[, -which(colMeans(is.na(training_ds)) > 0.75)]
+    testing_ds   <-testing_ds[, -which(colMeans(is.na(testing_ds)) > 0.75)]
+    
+##  Verify that all of the NAs have been removed from the training and test data sets.
+    
+    sum(is.na(training_ds))
+    sum(is.na(testing_ds))
+    
+##  Remove unrelated text related columns (1-7).
+    
+    training_ds  <- training_ds[,-c(1:7)]
+    testing_ds   <- testing_ds[,-c(1:7)]
+    
+##  Review the dimensions of the training and test data sets. 
+    
+    dim(training_ds)
+    dim(testing_ds)
+    
+##  Set train control settings
+    
+    mod_trControl <- trainControl(method = "cv", number = 5)
+
+##  Create a classification tree model using the rpart method to fit the data.
+
+    modFit_rpart <- train(classe~., data=training, method = "rpart", trControl = mod_trControl)
+    fancyRpartPlot(modFit_rpart$finalModel)
+    
+##  Use a confusion matrix to generate the prediction output.
+
+    predict_rpart <- predict(modFit_rpart, testing)
+    confMatrix_rpart <- confusionMatrix(testing$classe, predict_rpart)
+    confMatrix_rpart
+
+##  Create a random forest model using the rf method to fit the data.
+
+    modFit_rf <- randomForest(classe~., data=training, importance=TRUE)
+    
+##  Use a confusion matrix to generate the prediction output.
+
+    predict_rf <- predict(modFit_rf, testing)
+    confMatrix_rf <- confusionMatrix(testing$classe, predict_rf)
+    confMatrix_rf
+    
+##  Create a random generalized boosted model using the gbm method to fit the data.
+
+    modFit_gbm <- train(classe~., data=training, method = "gbm", trControl = mod_trControl, verbose=FALSE)
+
+##  Use a confusion matrix to generate the prediction output.
+
+    predict_gbm <- predict(modFit_gbm, testing)
+    confMatrix_gbm <- confusionMatrix(testing$classe, predict_gbm)
+    confMatrix_gbm
+
+##  Use a confusion matrix to generate the prediction output.
+
+    predict(modFit_rf, testing_ds)
